@@ -1,0 +1,41 @@
+#!/bin/sh
+
+# Factory defaults for images that embed this package in /rom.
+# Existing values restored by sysupgrade are deliberately preserved.
+
+uci -q get opencellid.main >/dev/null || uci set opencellid.main='opencellid'
+
+set_default() {
+	uci -q get "opencellid.main.$1" >/dev/null || uci set "opencellid.main.$1=$2"
+}
+
+set_default enabled 0
+set_default interval 300
+set_default heartbeat_interval 3600
+set_default publish_on_change 1
+set_default cache_ttl 86400
+set_default backoff_initial 30
+set_default backoff_max 900
+set_default queue_size 10
+set_default opencellid_url https://opencellid.org/cell/get
+set_default reverse_geocode 1
+set_default geocode_url https://nominatim.openstreetmap.org/reverse
+set_default geocode_min_interval 60
+set_default mqtt_port 8883
+set_default mqtt_topic zlan9809m/location
+set_default mqtt_status_topic zlan9809m/status
+set_default mqtt_client_id zlan9809m
+set_default mqtt_tls 1
+set_default mqtt_insecure 0
+set_default mqtt_retain 1
+set_default mqtt_will 1
+set_default cell_source auto
+set_default modem_device /dev/ttyUSB2
+set_default qmi_device /dev/cdc-wdm0
+set_default at_adapter auto
+set_default wwan_interface wwan
+
+uci commit opencellid
+/etc/init.d/opencellid enable
+exit 0
+

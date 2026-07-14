@@ -1,5 +1,7 @@
 # Atualização para 1.1.0
 
+> A versão 1.1.1 adiciona o payload persistente para imagens SquashFS. Uma atualização comum por `.ipk` continua no overlay e não sobrevive ao factory reset; consulte a seção “Persistência após factory reset” do README.
+
 A configuração 1.0 permanece compatível. Ao reinstalar o pacote, o arquivo UCI existente é preservado por ser declarado como `conffile`.
 
 ```sh

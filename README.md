@@ -26,6 +26,25 @@ Serviço leve para OpenWrt que identifica a célula móvel usada pelo roteador Z
 
 Veja [CHANGELOG.md](CHANGELOG.md) para a lista completa e [UPGRADING.md](UPGRADING.md) para atualizar uma instalação 1.0.
 
+## Persistência após factory reset
+
+Desde a versão 1.1.1, o pacote inclui `/etc/uci-defaults/99-opencellid`. Quando o pacote é incorporado ao SquashFS da imagem, esse arquivo permanece em `/rom` e recria os padrões do serviço depois que o reset apaga o overlay JFFS2.
+
+Instalar o `.ipk` normalmente não torna o código resistente ao reset: nesse caso os arquivos continuam no overlay. Para preparar um SquashFS extraído, em uma máquina Linux e nunca no rootfs vivo do roteador:
+
+```sh
+unsquashfs -d work/rootfs rootfs.bin
+scripts/install-into-rootfs.sh work/rootfs \
+  packages/libmosquitto-ssl_*.ipk \
+  packages/mosquitto-client-ssl_*.ipk
+```
+
+O instalador aceita dependências adicionais `.ipk`, copia o payload, corrige permissões e falha se `uci`, `jsonfilter`, `uclient-fetch` ou `mosquitto_pub` não estiverem presentes. Para o ZLAN auditado, os pacotes devem ser compatíveis com OpenWrt 21.02.0 e `mipsel_24kc`.
+
+O script recusa explicitamente `/`, `/rom` e `/overlay`; ele não grava flash nem cria uma imagem final. A remontagem do SquashFS, composição do firmware, metadata `fwtool`, validação `sysupgrade -T` e recuperação por UART são etapas separadas que precisam ser concluídas antes de qualquer flash.
+
+Os padrões deixam o serviço desativado até que broker e chave OpenCellID sejam provisionados. Nenhuma credencial é embutida na imagem. Para uma configuração de fábrica diferente, edite `files/etc/uci-defaults/99-opencellid` antes da construção, mantendo segredos fora do firmware.
+
 ## Requisitos
 
 O firmware precisa ser baseado em OpenWrt e permitir SSH/opkg. O pacote declara as dependências: `luci-base`, `jsonfilter`, `uci`, `uclient-fetch`, `ca-bundle` e `mosquitto-client-ssl`. Para coleta automática, o firmware deve expor dados celulares no `ubus`, ou ter `uqmi`, ou disponibilizar `microcom` e uma porta AT.

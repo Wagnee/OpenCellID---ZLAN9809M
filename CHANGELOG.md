@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 — 2026-07-14
+
+### Adicionado
+
+- `99-opencellid` em `/etc/uci-defaults` para recriar configurações seguras e habilitar o serviço após factory reset quando o pacote estiver incorporado ao SquashFS;
+- instalador offline `scripts/install-into-rootfs.sh` para injetar o payload em um rootfs OpenWrt extraído;
+- suporte do instalador à extração de dependências `.ipk` gzip, xz ou zstd;
+- proteções contra uso acidental do instalador em `/`, `/rom` ou `/overlay` de um equipamento ativo;
+- teste de integração específico para persistência no rootfs.
+
+O script preserva valores UCI já existentes e não incorpora chaves de API, senhas MQTT ou chaves privadas.
+
 ## 1.1.0 — 2026-07-14
 
 ### Adicionado
@@ -26,4 +38,3 @@
 ## 1.0.0 — 2026-07-14
 
 - primeira versão do agente OpenCellID, MQTT, procd e LuCI.
-

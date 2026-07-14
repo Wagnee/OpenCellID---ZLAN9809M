@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-opencellid-mqtt
-PKG_VERSION:=1.1.0
+PKG_VERSION:=1.1.1
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 
@@ -28,9 +28,10 @@ define Package/$(PKG_NAME)/conffiles
 endef
 
 define Package/$(PKG_NAME)/install
-	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d $(1)/usr/sbin
+	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d $(1)/etc/uci-defaults $(1)/usr/sbin
 	$(INSTALL_CONF) ./files/etc/config/opencellid $(1)/etc/config/opencellid
 	$(INSTALL_BIN) ./files/etc/init.d/opencellid $(1)/etc/init.d/opencellid
+	$(INSTALL_DATA) ./files/etc/uci-defaults/99-opencellid $(1)/etc/uci-defaults/99-opencellid
 	$(INSTALL_BIN) ./files/usr/sbin/opencellid-agent $(1)/usr/sbin/opencellid-agent
 	$(INSTALL_BIN) ./files/usr/sbin/opencellid-diagnose $(1)/usr/sbin/opencellid-diagnose
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller $(1)/usr/lib/lua/luci/model/cbi
