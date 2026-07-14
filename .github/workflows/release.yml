@@ -1,0 +1,23 @@
+name: Release IPK
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build IPK
+        run: scripts/build-ipk.sh
+      - name: Verify tag matches package
+        run: test "$GITHUB_REF_NAME" = "v$(sed -n 's/^PKG_VERSION:=//p' Makefile)"
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" bin/*.ipk --generate-notes --title "$GITHUB_REF_NAME"
+

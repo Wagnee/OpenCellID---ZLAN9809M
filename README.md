@@ -12,6 +12,20 @@ Serviço leve para OpenWrt que identifica a célula móvel usada pelo roteador Z
 - estado somente em `/tmp/opencellid-state.json`, sem gravações periódicas na flash;
 - código próprio com menos de 50 KB. As dependências são pacotes compartilhados do firmware e não fazem parte desse tamanho.
 
+## Novidades da versão 1.1
+
+- cache por célula, evitando repetir consultas OpenCellID/geocodificação;
+- backoff exponencial com jitter quando internet, API ou broker falham;
+- fila limitada em RAM e reenvio automático quando o MQTT retorna;
+- publicação por mudança de célula/bairro, com heartbeat configurável;
+- tópico separado de saúde, contadores e MQTT Last Will;
+- diagnóstico de modem e adaptadores Quectel, SIMCom e 3GPP genérico;
+- CA personalizada e autenticação mTLS;
+- acionamento quando a interface WWAN sobe;
+- validação contínua com GitHub Actions.
+
+Veja [CHANGELOG.md](CHANGELOG.md) para a lista completa e [UPGRADING.md](UPGRADING.md) para atualizar uma instalação 1.0.
+
 ## Requisitos
 
 O firmware precisa ser baseado em OpenWrt e permitir SSH/opkg. O pacote declara as dependências: `luci-base`, `jsonfilter`, `uci`, `uclient-fetch`, `ca-bundle` e `mosquitto-client-ssl`. Para coleta automática, o firmware deve expor dados celulares no `ubus`, ou ter `uqmi`, ou disponibilizar `microcom` e uma porta AT.
@@ -63,9 +77,17 @@ scp bin/packages/*/*/luci-app-opencellid-mqtt_*.ipk root@192.168.1.1:/tmp/
 ssh root@192.168.1.1 'opkg install /tmp/luci-app-opencellid-mqtt_*.ipk'
 ```
 
+Para gerar diretamente o pacote `all` em Linux, sem SDK:
+
+```sh
+scripts/build-ipk.sh
+```
+
+O CI anexa esse `.ipk` a cada execução e o workflow de release publica o pacote quando uma tag `vX.Y.Z` é enviada.
+
 ## Configuração
 
-Acesse **Serviços → Cell Location / MQTT**, preencha a chave OpenCellID, broker, porta, tópico e intervalo (mínimo de 30 segundos). Salvar a página reinicia o serviço.
+Acesse **Serviços → Cell Location / MQTT**, preencha a chave OpenCellID, broker, porta, tópico e intervalo (mínimo de 30 segundos). A página também permite coletar imediatamente, testar o broker e gerar o diagnóstico do modem. Salvar reinicia o serviço.
 
 Também é possível configurar via SSH:
 
@@ -101,6 +123,37 @@ ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 
 Se a porta/dispositivo for diferente, ajuste na página. O modo manual é útil para validar OpenCellID e MQTT sem depender da detecção do modem.
 
+O diagnóstico completo está disponível por SSH:
+
+```sh
+/usr/sbin/opencellid-diagnose
+```
+
+Em portas AT, `auto` tenta Quectel `AT+QENG="servingcell"`, SIMCom `AT+CPSI?` e então o padrão `AT+CEREG?`. A disposição exata dos campos pode variar por firmware do modem; confirme MCC, MNC, TAC e Cell ID no diagnóstico antes de operar em produção.
+
+## Cache, fila e política de publicação
+
+Todos os dados transitórios ficam em `/tmp/opencellid`:
+
+- `cache/`: uma resposta por célula, expirada por `cache_ttl`;
+- `queue/`: publicações que falharam, limitada por `queue_size`;
+- `metrics`: contadores e controle de heartbeat;
+- `state.json`: última execução.
+
+Com `publish_on_change=1`, a localização só é enviada quando a célula ou o bairro muda. `heartbeat_interval` força uma atualização periódica mesmo sem movimento. Em falhas, o intervalo cresce de `backoff_initial` até `backoff_max`, com jitter de até 10 segundos.
+
+O Nominatim público exige identificação, cache e uso moderado. O agente usa User-Agent próprio, cache por célula e intervalo mínimo de 60 segundos. Para frotas ou rastreamento comercial, configure um proxy/servidor próprio ou outro provedor; o endpoint pode ser alterado sem atualizar o pacote.
+
+## MQTT de localização e saúde
+
+O tópico principal recebe a localização. `mqtt_status_topic` recebe mensagens retidas de saúde com versão, fonte celular, contadores e tamanho da fila. Quando habilitado, o Last Will marca o dispositivo como offline se uma conexão MQTT for interrompida inesperadamente. O serviço também publica offline durante encerramento normal sempre que houver conectividade.
+
+Para autenticação por certificado, configure `mqtt_ca_file`, `mqtt_cert_file` e `mqtt_key_file`. Proteja chave e configuração:
+
+```sh
+chmod 600 /etc/config/opencellid /etc/ssl/private/roteador.key
+```
+
 ## Operação e diagnóstico
 
 ```sh
@@ -109,6 +162,12 @@ Se a porta/dispositivo for diferente, ajuste na página. O modo manual é útil 
 
 # Ver o último estado (fica somente em RAM)
 /usr/sbin/opencellid-agent status
+
+# Diagnóstico de hardware/firmware
+/usr/sbin/opencellid-agent diagnose
+
+# Teste do tópico MQTT de saúde
+/usr/sbin/opencellid-agent test-mqtt
 
 # Logs
 logread -e opencellid
@@ -131,6 +190,11 @@ O campo `range_m` é a estimativa fornecida pelo OpenCellID. A posição represe
 - A senha MQTT e a chave OpenCellID ficam no UCI (`/etc/config/opencellid`); restrinja o acesso SSH/LuCI ao roteador.
 - Não publique o tópico em brokers públicos: a mensagem revela a localização aproximada do equipamento.
 - A geocodificação reversa envia latitude/longitude ao serviço configurado. Desative-a se quiser publicar apenas coordenadas.
+- Para múltiplos roteadores, prefira geocodificação no servidor MQTT ou um proxy com cache, evitando depender da API pública do Nominatim.
+
+## Desenvolvimento e CI
+
+`tests/test-agent.sh` simula UCI, APIs e MQTT para verificar coleta, cache, publicação por mudança, TLS e Last Will. O workflow em `.github/workflows/ci.yml` executa o teste, ShellCheck, validação de sintaxe e bloqueia o build se o projeto superar 1 MB.
 
 ## Licença
 

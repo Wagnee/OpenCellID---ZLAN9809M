@@ -1,0 +1,38 @@
+name: Validate OpenWrt package
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install checks
+        run: sudo apt-get update && sudo apt-get install -y shellcheck lua5.1
+      - name: Shell syntax and integration
+        run: |
+          sh -n files/usr/sbin/opencellid-agent
+          sh -n files/usr/sbin/opencellid-diagnose
+          sh -n files/etc/init.d/opencellid
+          sh -n scripts/build-ipk.sh
+          sh tests/test-agent.sh
+          luac5.1 -p files/usr/lib/lua/luci/controller/opencellid.lua
+          luac5.1 -p files/usr/lib/lua/luci/model/cbi/opencellid.lua
+      - name: ShellCheck
+        run: shellcheck -x -e SC3043 files/usr/sbin/opencellid-agent files/usr/sbin/opencellid-diagnose files/etc/init.d/opencellid scripts/build-ipk.sh tests/test-agent.sh
+      - name: Enforce 1 MB project limit
+        run: test "$(du -sb --exclude=.git . | cut -f1)" -le 1048576
+      - name: Build architecture-independent IPK
+        run: |
+          scripts/build-ipk.sh
+          test "$(stat -c %s bin/*.ipk)" -le 1048576
+          ar t bin/*.ipk | grep -qx data.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-opencellid-mqtt
+          path: bin/*.ipk

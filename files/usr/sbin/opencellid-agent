@@ -1,139 +1,245 @@
 #!/bin/sh
 
+VERSION=1.1.0
 CONFIG=opencellid
-STATE=/tmp/opencellid-state.json
-RAW=/tmp/opencellid-response.$$
+RUNTIME=/tmp/opencellid
+STATE=$RUNTIME/state.json
+METRICS=$RUNTIME/metrics
+CACHE=$RUNTIME/cache
+QUEUE=$RUNTIME/queue
+RAW=$RUNTIME/response.$$
+mkdir -p "$CACHE" "$QUEUE"
+chmod 700 "$RUNTIME" "$CACHE" "$QUEUE" 2>/dev/null
 trap 'rm -f "$RAW" "$RAW.geo"' EXIT INT TERM
 
 log() { logger -t opencellid "$*"; }
 cfg() { uci -q get "$CONFIG.main.$1"; }
-json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/ /g'; }
+esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/ /g'; }
 is_uint() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
+number_or() { is_uint "$1" && printf '%s' "$1" || printf '%s' "$2"; }
+now() { date +%s; }
+iso_now() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
+metric_get() { sed -n "s/^$1=//p" "$METRICS" 2>/dev/null | tail -n1; }
+metric_set() { _k=$1; _v=$2; sed "/^${_k}=/d" "$METRICS" 2>/dev/null > "$METRICS.tmp" || :; printf '%s=%s\n' "$_k" "$_v" >> "$METRICS.tmp"; mv "$METRICS.tmp" "$METRICS"; }
+metric_inc() { _v=$(metric_get "$1"); _v=$(number_or "$_v" 0); metric_set "$1" $((_v + 1)); }
+
+urlencode() {
+	printf '%s' "$1" | sed 's/%/%25/g;s/ /%20/g;s/+/%2B/g;s/&/%26/g;s/?/%3F/g;s/#/%23/g'
+}
 
 http_get() {
 	_url=$1; _out=$2
 	if command -v uclient-fetch >/dev/null 2>&1; then
-		uclient-fetch -q -T 20 -O "$_out" "$_url"
+		uclient-fetch -q -T 20 --user-agent "zlan9809m-opencellid/$VERSION" -O "$_out" "$_url"
 	elif command -v curl >/dev/null 2>&1; then
-		curl -fsSL --connect-timeout 10 --max-time 20 -A 'zlan9809m-opencellid/1.0' -o "$_out" "$_url"
-	else
-		return 127
-	fi
+		curl -fsSL --connect-timeout 10 --max-time 20 -A "zlan9809m-opencellid/$VERSION" -o "$_out" "$_url"
+	else return 127; fi
 }
 
 read_manual() {
 	MCC=$(cfg manual_mcc); MNC=$(cfg manual_mnc); LAC=$(cfg manual_lac)
-	CID=$(cfg manual_cid); RADIO=$(cfg manual_radio); SIGNAL=''
+	CID=$(cfg manual_cid); RADIO=$(cfg manual_radio); SIGNAL=; SOURCE=manual
 }
 
 read_ubus() {
 	command -v ubus >/dev/null 2>&1 || return 1
-	_j=$(ubus call network.interface.wwan status 2>/dev/null) || return 1
+	_iface=$(cfg wwan_interface); [ -n "$_iface" ] || _iface=wwan
+	_j=$(ubus call "network.interface.${_iface}" status 2>/dev/null) || return 1
 	MCC=$(printf '%s' "$_j" | jsonfilter -e '@.data.mcc' 2>/dev/null)
 	MNC=$(printf '%s' "$_j" | jsonfilter -e '@.data.mnc' 2>/dev/null)
 	LAC=$(printf '%s' "$_j" | jsonfilter -e '@.data.lac' 2>/dev/null)
 	[ -n "$LAC" ] || LAC=$(printf '%s' "$_j" | jsonfilter -e '@.data.tac' 2>/dev/null)
 	CID=$(printf '%s' "$_j" | jsonfilter -e '@.data.cellid' 2>/dev/null)
 	[ -n "$CID" ] || CID=$(printf '%s' "$_j" | jsonfilter -e '@.data.cid' 2>/dev/null)
-	RADIO=$(printf '%s' "$_j" | jsonfilter -e '@.data.radio' 2>/dev/null)
-	SIGNAL=$(printf '%s' "$_j" | jsonfilter -e '@.data.signal' 2>/dev/null)
+	RADIO=$(printf '%s' "$_j" | jsonfilter -e '@.data.radio' 2>/dev/null | tr '[:lower:]' '[:upper:]')
+	SIGNAL=$(printf '%s' "$_j" | jsonfilter -e '@.data.signal' 2>/dev/null); SOURCE=ubus
 }
 
 read_uqmi() {
 	command -v uqmi >/dev/null 2>&1 || return 1
 	_dev=$(cfg qmi_device); [ -n "$_dev" ] || _dev=/dev/cdc-wdm0
-	_serving=$(uqmi -d "$_dev" --get-serving-system 2>/dev/null) || return 1
-	_signal=$(uqmi -d "$_dev" --get-signal-info 2>/dev/null)
-	_plmn=$(printf '%s' "$_serving" | jsonfilter -e '@.plmn_mcc' 2>/dev/null)
-	MCC=${_plmn:-$(printf '%s' "$_serving" | jsonfilter -e '@.mcc' 2>/dev/null)}
-	MNC=$(printf '%s' "$_serving" | jsonfilter -e '@.plmn_mnc' 2>/dev/null)
-	[ -n "$MNC" ] || MNC=$(printf '%s' "$_serving" | jsonfilter -e '@.mnc' 2>/dev/null)
-	LAC=$(printf '%s' "$_serving" | jsonfilter -e '@.tracking_area_code' 2>/dev/null)
-	[ -n "$LAC" ] || LAC=$(printf '%s' "$_serving" | jsonfilter -e '@.lac' 2>/dev/null)
-	CID=$(printf '%s' "$_serving" | jsonfilter -e '@.cell_id' 2>/dev/null)
-	RADIO=$(printf '%s' "$_serving" | jsonfilter -e '@.radio_interface' 2>/dev/null | tr 'a-z' 'A-Z')
-	SIGNAL=$(printf '%s' "$_signal" | jsonfilter -e '@.lte.rsrp' 2>/dev/null)
+	_j=$(uqmi -d "$_dev" --get-serving-system 2>/dev/null) || return 1
+	_s=$(uqmi -d "$_dev" --get-signal-info 2>/dev/null)
+	MCC=$(printf '%s' "$_j" | jsonfilter -e '@.plmn_mcc' 2>/dev/null); [ -n "$MCC" ] || MCC=$(printf '%s' "$_j" | jsonfilter -e '@.mcc' 2>/dev/null)
+	MNC=$(printf '%s' "$_j" | jsonfilter -e '@.plmn_mnc' 2>/dev/null); [ -n "$MNC" ] || MNC=$(printf '%s' "$_j" | jsonfilter -e '@.mnc' 2>/dev/null)
+	LAC=$(printf '%s' "$_j" | jsonfilter -e '@.tracking_area_code' 2>/dev/null); [ -n "$LAC" ] || LAC=$(printf '%s' "$_j" | jsonfilter -e '@.lac' 2>/dev/null)
+	CID=$(printf '%s' "$_j" | jsonfilter -e '@.cell_id' 2>/dev/null)
+	RADIO=$(printf '%s' "$_j" | jsonfilter -e '@.radio_interface' 2>/dev/null | tr '[:lower:]' '[:upper:]')
+	SIGNAL=$(printf '%s' "$_s" | jsonfilter -e '@.lte.rsrp' 2>/dev/null); SOURCE=uqmi
 }
 
-read_at() {
+at_query() {
 	_dev=$(cfg modem_device); [ -c "$_dev" ] || return 1
 	command -v microcom >/dev/null 2>&1 || return 1
-	_resp=$(printf 'AT+COPS=3,2\rAT+COPS?\rAT+CEREG=2\rAT+CEREG?\r' | microcom -t 2000 "$_dev" 2>/dev/null)
+	printf '%s\r' "$1" | microcom -t 2500 "$_dev" 2>/dev/null
+}
+
+read_at_generic() {
+	_resp=$(at_query 'AT+COPS=3,2;+COPS?;+CEREG=2;+CEREG?') || return 1
 	_plmn=$(printf '%s\n' "$_resp" | sed -n 's/.*+COPS: [^,]*,[^,]*,"\([0-9][0-9]*\)".*/\1/p' | tail -n1)
 	MCC=$(printf '%s' "$_plmn" | cut -c1-3); MNC=$(printf '%s' "$_plmn" | cut -c4-)
 	_reg=$(printf '%s\n' "$_resp" | sed -n 's/.*+CEREG: [^,]*,[^,]*,"\([0-9A-Fa-f]*\)","\([0-9A-Fa-f]*\)".*/\1 \2/p' | tail -n1)
-	LAC=$(printf '%s' "$_reg" | awk '{print $1}'); CID=$(printf '%s' "$_reg" | awk '{print $2}')
-	[ -n "$LAC" ] && LAC=$((0x$LAC)); [ -n "$CID" ] && CID=$((0x$CID)); RADIO=LTE
+	_lac=$(printf '%s' "$_reg" | awk '{print $1}'); _cid=$(printf '%s' "$_reg" | awk '{print $2}')
+	[ -n "$_lac" ] && LAC=$((0x$_lac)); [ -n "$_cid" ] && CID=$((0x$_cid)); RADIO=LTE; SOURCE=at-generic
 }
 
-get_cell() {
-	_source=$(cfg cell_source); [ -n "$_source" ] || _source=auto
-	case "$_source" in
-		manual) read_manual;; ubus) read_ubus;; uqmi) read_uqmi;; at) read_at;;
-		auto) read_ubus; valid_cell || read_uqmi; valid_cell || read_at; valid_cell || read_manual;;
-		*) return 1;;
-	esac
-	valid_cell
+read_at_quectel() {
+	_resp=$(at_query 'AT+QENG="servingcell"') || return 1
+	_line=$(printf '%s\n' "$_resp" | grep '+QENG: "servingcell"' | tail -n1)
+	MCC=$(printf '%s' "$_line" | awk -F, '{gsub(/"/,"",$5); print $5}')
+	MNC=$(printf '%s' "$_line" | awk -F, '{gsub(/"/,"",$6); print $6}')
+	CID=$(printf '%s' "$_line" | awk -F, '{gsub(/"/,"",$7); print $7}')
+	LAC=$(printf '%s' "$_line" | awk -F, '{gsub(/"/,"",$13); print $13}')
+	SIGNAL=$(printf '%s' "$_line" | awk -F, '{print $14}'); RADIO=LTE; SOURCE=at-quectel
+}
+
+read_at_simcom() {
+	_resp=$(at_query 'AT+CPSI?') || return 1
+	_line=$(printf '%s\n' "$_resp" | grep '+CPSI:' | tail -n1)
+	_plmn=$(printf '%s' "$_line" | awk -F, '{gsub(/[ +CPSI:]/,"",$3); print $3}')
+	MCC=$(printf '%s' "$_plmn" | cut -d- -f1); MNC=$(printf '%s' "$_plmn" | cut -d- -f2)
+	_lac=$(printf '%s' "$_line" | awk -F, '{print $4}'); _cid=$(printf '%s' "$_line" | awk -F, '{print $5}')
+	case "$_lac" in 0x*) LAC=$(( _lac ));; *) LAC=$_lac;; esac; case "$_cid" in 0x*) CID=$(( _cid ));; *) CID=$_cid;; esac
+	RADIO=$(printf '%s' "$_line" | awk -F'[:,]' '{gsub(/ /,"",$2); print toupper($2)}'); SIGNAL=$(printf '%s' "$_line" | awk -F, '{print $13}'); SOURCE=at-simcom
+}
+
+read_at() {
+	_adapter=$(cfg at_adapter); [ -n "$_adapter" ] || _adapter=auto
+	case "$_adapter" in quectel) read_at_quectel;; simcom) read_at_simcom;; generic) read_at_generic;;
+		auto) read_at_quectel; valid_cell || read_at_simcom; valid_cell || read_at_generic;; *) return 1;; esac
 }
 
 valid_cell() { is_uint "$MCC" && is_uint "$MNC" && is_uint "$LAC" && is_uint "$CID"; }
+get_cell() {
+	_source=$(cfg cell_source); [ -n "$_source" ] || _source=auto
+	case "$_source" in manual) read_manual;; ubus) read_ubus;; uqmi) read_uqmi;; at) read_at;;
+		auto) read_ubus; valid_cell || read_uqmi; valid_cell || read_at; valid_cell || read_manual;; *) return 1;; esac
+	valid_cell
+}
+
+cache_file() { printf '%s/%s-%s-%s-%s-%s.json' "$CACHE" "$MCC" "$MNC" "$LAC" "$CID" "${RADIO:-ANY}"; }
+load_location() {
+	_f=$(cache_file); [ -r "$_f" ] || return 1
+	_t=$(jsonfilter -i "$_f" -e '@.cached_at' 2>/dev/null); _ttl=$(number_or "$(cfg cache_ttl)" 86400)
+	[ $(( $(now) - ${_t:-0} )) -lt "$_ttl" ] || return 1
+	parse_location "$_f"; CACHE_HIT=true
+}
+parse_location() {
+	LAT=$(jsonfilter -i "$1" -e '@.lat' 2>/dev/null); LON=$(jsonfilter -i "$1" -e '@.lon' 2>/dev/null)
+	RANGE=$(jsonfilter -i "$1" -e '@.range' 2>/dev/null); SAMPLES=$(jsonfilter -i "$1" -e '@.samples' 2>/dev/null)
+	NEIGHBORHOOD=$(jsonfilter -i "$1" -e '@.neighborhood' 2>/dev/null); CITY=$(jsonfilter -i "$1" -e '@.city' 2>/dev/null); REGION=$(jsonfilter -i "$1" -e '@.state' 2>/dev/null)
+	[ -n "$LAT" ] && [ -n "$LON" ]
+}
+save_cache() {
+	_f=$(cache_file); printf '{"cached_at":%s,"lat":%s,"lon":%s,"range":%s,"samples":%s,"neighborhood":"%s","city":"%s","state":"%s"}\n' \
+		"$(now)" "$LAT" "$LON" "${RANGE:-null}" "${SAMPLES:-null}" "$(esc "$NEIGHBORHOOD")" "$(esc "$CITY")" "$(esc "$REGION")" > "$_f"
+}
 
 locate() {
+	CACHE_HIT=false; load_location && return 0
 	_key=$(cfg opencellid_key); [ -n "$_key" ] || { ERROR='OpenCellID API key not configured'; return 1; }
 	_base=$(cfg opencellid_url); [ -n "$_base" ] || _base=https://opencellid.org/cell/get
-	_url="${_base}?key=${_key}&mcc=${MCC}&mnc=${MNC}&lac=${LAC}&cellid=${CID}&format=json"
+	_url="${_base}?key=$(urlencode "$_key")&mcc=${MCC}&mnc=${MNC}&lac=${LAC}&cellid=${CID}&format=json"
 	[ -n "$RADIO" ] && _url="${_url}&radio=${RADIO}"
 	http_get "$_url" "$RAW" || { ERROR='OpenCellID request failed'; return 1; }
-	LAT=$(jsonfilter -i "$RAW" -e '@.lat' 2>/dev/null); LON=$(jsonfilter -i "$RAW" -e '@.lon' 2>/dev/null)
-	RANGE=$(jsonfilter -i "$RAW" -e '@.range' 2>/dev/null); SAMPLES=$(jsonfilter -i "$RAW" -e '@.samples' 2>/dev/null)
-	[ -n "$LAT" ] && [ -n "$LON" ] || { ERROR=$(jsonfilter -i "$RAW" -e '@.err.info' 2>/dev/null); [ -n "$ERROR" ] || ERROR='Cell not found'; return 1; }
+	parse_location "$RAW" || { ERROR=$(jsonfilter -i "$RAW" -e '@.err.info' 2>/dev/null); [ -n "$ERROR" ] || ERROR='Cell not found'; return 1; }
 }
 
 reverse_geocode() {
-	[ "$(cfg reverse_geocode)" = 1 ] || return 0
+	[ "$CACHE_HIT" = true ] && return 0
+	[ "$(cfg reverse_geocode)" = 1 ] || { save_cache; return 0; }
+	_min=$(number_or "$(cfg geocode_min_interval)" 60); _last=$(metric_get last_geocode); _last=$(number_or "$_last" 0)
+	_wait=$(( _min - ($(now) - _last) )); [ "$_wait" -le 0 ] || sleep "$_wait"
 	_base=$(cfg geocode_url); [ -n "$_base" ] || _base=https://nominatim.openstreetmap.org/reverse
-	http_get "${_base}?format=jsonv2&lat=${LAT}&lon=${LON}&zoom=16&addressdetails=1" "$RAW.geo" || return 0
-	NEIGHBORHOOD=$(jsonfilter -i "$RAW.geo" -e '@.address.neighbourhood' 2>/dev/null)
-	[ -n "$NEIGHBORHOOD" ] || NEIGHBORHOOD=$(jsonfilter -i "$RAW.geo" -e '@.address.suburb' 2>/dev/null)
-	[ -n "$NEIGHBORHOOD" ] || NEIGHBORHOOD=$(jsonfilter -i "$RAW.geo" -e '@.address.city_district' 2>/dev/null)
-	CITY=$(jsonfilter -i "$RAW.geo" -e '@.address.city' 2>/dev/null)
-	[ -n "$CITY" ] || CITY=$(jsonfilter -i "$RAW.geo" -e '@.address.town' 2>/dev/null)
-	STATE_NAME=$(jsonfilter -i "$RAW.geo" -e '@.address.state' 2>/dev/null)
+	if http_get "${_base}?format=jsonv2&lat=${LAT}&lon=${LON}&zoom=16&addressdetails=1" "$RAW.geo"; then
+		metric_set last_geocode "$(now)"
+		NEIGHBORHOOD=$(jsonfilter -i "$RAW.geo" -e '@.address.neighbourhood' 2>/dev/null); [ -n "$NEIGHBORHOOD" ] || NEIGHBORHOOD=$(jsonfilter -i "$RAW.geo" -e '@.address.suburb' 2>/dev/null); [ -n "$NEIGHBORHOOD" ] || NEIGHBORHOOD=$(jsonfilter -i "$RAW.geo" -e '@.address.city_district' 2>/dev/null)
+		CITY=$(jsonfilter -i "$RAW.geo" -e '@.address.city' 2>/dev/null); [ -n "$CITY" ] || CITY=$(jsonfilter -i "$RAW.geo" -e '@.address.town' 2>/dev/null)
+		REGION=$(jsonfilter -i "$RAW.geo" -e '@.address.state' 2>/dev/null)
+	fi
+	save_cache
 }
 
 write_state() {
-	_now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-	_payload="{\"timestamp\":\"$_now\",\"ok\":$1,\"cell\":{\"mcc\":${MCC:-null},\"mnc\":${MNC:-null},\"lac\":${LAC:-null},\"cid\":${CID:-null},\"radio\":\"$(json_escape "$RADIO")\",\"signal\":\"$(json_escape "$SIGNAL")\"},\"location\":{\"lat\":${LAT:-null},\"lon\":${LON:-null},\"range_m\":${RANGE:-null},\"samples\":${SAMPLES:-null},\"neighborhood\":\"$(json_escape "$NEIGHBORHOOD")\",\"city\":\"$(json_escape "$CITY")\",\"state\":\"$(json_escape "$STATE_NAME")\"},\"error\":\"$(json_escape "$ERROR")\"}"
+	_payload="{\"version\":\"$VERSION\",\"timestamp\":\"$(iso_now)\",\"ok\":$1,\"source\":\"$(esc "$SOURCE")\",\"cache_hit\":${CACHE_HIT:-false},\"cell\":{\"mcc\":${MCC:-null},\"mnc\":${MNC:-null},\"lac\":${LAC:-null},\"cid\":${CID:-null},\"radio\":\"$(esc "$RADIO")\",\"signal\":\"$(esc "$SIGNAL")\"},\"location\":{\"lat\":${LAT:-null},\"lon\":${LON:-null},\"range_m\":${RANGE:-null},\"samples\":${SAMPLES:-null},\"neighborhood\":\"$(esc "$NEIGHBORHOOD")\",\"city\":\"$(esc "$CITY")\",\"state\":\"$(esc "$REGION")\"},\"health\":{\"successes\":$(number_or "$(metric_get successes)" 0),\"failures\":$(number_or "$(metric_get failures)" 0),\"queued\":$(find "$QUEUE" -type f 2>/dev/null | wc -l)},\"error\":\"$(esc "$ERROR")\"}"
 	printf '%s\n' "$_payload" > "$STATE"
 }
 
-publish() {
-	command -v mosquitto_pub >/dev/null 2>&1 || { ERROR='mosquitto_pub not installed'; return 1; }
+mqtt_args() {
 	_host=$(cfg mqtt_host); [ -n "$_host" ] || { ERROR='MQTT host not configured'; return 1; }
-	_port=$(cfg mqtt_port); _topic=$(cfg mqtt_topic); _id=$(cfg mqtt_client_id)
-	set -- -h "$_host" -p "${_port:-8883}" -t "${_topic:-zlan9809m/location}" -i "${_id:-zlan9809m}" -m "$(cat "$STATE")" -q 1
-	[ "$(cfg mqtt_retain)" = 1 ] && set -- "$@" -r
+	set -- -h "$_host" -p "$(number_or "$(cfg mqtt_port)" 8883)" -i "${MQTT_ID:-$(cfg mqtt_client_id)}" -q 1
 	_user=$(cfg mqtt_username); [ -n "$_user" ] && set -- "$@" -u "$_user" -P "$(cfg mqtt_password)"
 	if [ "$(cfg mqtt_tls)" = 1 ]; then
-		set -- "$@" --capath /etc/ssl/certs
+		_ca=$(cfg mqtt_ca_file); if [ -n "$_ca" ]; then set -- "$@" --cafile "$_ca"; else set -- "$@" --capath /etc/ssl/certs; fi
+		_cert=$(cfg mqtt_cert_file); _key=$(cfg mqtt_key_file); [ -n "$_cert" ] && [ -n "$_key" ] && set -- "$@" --cert "$_cert" --key "$_key"
 		[ "$(cfg mqtt_insecure)" = 1 ] && set -- "$@" --insecure
 	fi
+	MQTT_ARGS="$*"
+}
+publish_raw() {
+	command -v mosquitto_pub >/dev/null 2>&1 || { ERROR='mosquitto_pub not installed'; return 1; }
+	_topic=$1; _message=$2; _retain=$3
+	MQTT_ID=$(cfg mqtt_client_id); mqtt_args || return 1
+	# shellcheck disable=SC2086
+	set -- $MQTT_ARGS -t "$_topic" -m "$_message"
+	case "$_retain" in 1|retain) set -- "$@" -r;; esac
+	if [ "$(cfg mqtt_will)" = 1 ]; then
+		_st=$(cfg mqtt_status_topic); [ -n "$_st" ] && set -- "$@" --will-topic "$_st" --will-payload "{\"online\":false,\"version\":\"$VERSION\"}" --will-retain
+	fi
+	# Arguments contain configuration values controlled by root-only UCI.
+	# shellcheck disable=SC2086
 	mosquitto_pub "$@"
+}
+publish_status() {
+	_topic=$(cfg mqtt_status_topic); [ -n "$_topic" ] || return 0
+	_msg="{\"online\":$1,\"version\":\"$VERSION\",\"timestamp\":\"$(iso_now)\",\"source\":\"$(esc "$SOURCE")\",\"successes\":$(number_or "$(metric_get successes)" 0),\"failures\":$(number_or "$(metric_get failures)" 0),\"queued\":$(find "$QUEUE" -type f 2>/dev/null | wc -l)}"
+	publish_raw "$_topic" "$_msg" retain
+}
+enqueue() {
+	_max=$(number_or "$(cfg queue_size)" 10); [ "$_max" -gt 0 ] || return 0
+	cp "$STATE" "$QUEUE/$(now)-$$.json"
+	while [ "$(find "$QUEUE" -type f | wc -l)" -gt "$_max" ]; do rm -f "$(find "$QUEUE" -type f | sort | head -n1)"; done
+}
+flush_queue() {
+	_topic=$(cfg mqtt_topic); for _f in $(find "$QUEUE" -type f 2>/dev/null | sort); do publish_raw "${_topic:-zlan9809m/location}" "$(cat "$_f")" "$(cfg mqtt_retain)" && rm -f "$_f" || return 1; done
+}
+should_publish() {
+	[ "$(cfg publish_on_change)" = 1 ] || return 0
+	_key="${MCC}-${MNC}-${LAC}-${CID}-${NEIGHBORHOOD}"; _old=$(metric_get last_key)
+	_hb=$(number_or "$(cfg heartbeat_interval)" 3600); _last=$(number_or "$(metric_get last_publish)" 0)
+	[ "$_key" != "$_old" ] || [ $(( $(now) - _last )) -ge "$_hb" ]
+}
+publish_location() {
+	should_publish || return 0
+	_topic=$(cfg mqtt_topic); flush_queue || :
+	if publish_raw "${_topic:-zlan9809m/location}" "$(cat "$STATE")" "$(cfg mqtt_retain)"; then
+		metric_set last_key "${MCC}-${MNC}-${LAC}-${CID}-${NEIGHBORHOOD}"; metric_set last_publish "$(now)"; return 0
+	fi
+	enqueue; return 1
 }
 
 run_once() {
-	MCC= MNC= LAC= CID= RADIO= SIGNAL= LAT= LON= RANGE= SAMPLES= NEIGHBORHOOD= CITY= STATE_NAME= ERROR=
-	if ! get_cell; then ERROR='Unable to read a valid serving cell'; write_state false; log "$ERROR"; return 1; fi
-	if ! locate; then write_state false; log "$ERROR"; return 1; fi
-	reverse_geocode
-	write_state true
-	if publish; then log "location published: $LAT,$LON ${NEIGHBORHOOD:+($NEIGHBORHOOD)}"; else write_state false; log "$ERROR"; return 1; fi
+	MCC=''; MNC=''; LAC=''; CID=''; RADIO=''; SIGNAL=''; SOURCE=''; LAT=''; LON=''; RANGE=''; SAMPLES=''; NEIGHBORHOOD=''; CITY=''; REGION=''; ERROR=''; CACHE_HIT=false
+	if ! get_cell; then ERROR='Unable to read a valid serving cell'; write_state false; metric_inc failures; log "$ERROR"; return 1; fi
+	if ! locate; then write_state false; metric_inc failures; log "$ERROR"; return 1; fi
+	reverse_geocode; write_state true
+	if publish_location; then metric_inc successes; publish_status true >/dev/null 2>&1 || :; log "location ready: $LAT,$LON ${NEIGHBORHOOD:+($NEIGHBORHOOD)}"; else metric_inc failures; log "MQTT unavailable; location queued"; return 1; fi
+}
+
+daemon() {
+	_backoff=$(number_or "$(cfg backoff_initial)" 30); _max=$(number_or "$(cfg backoff_max)" 900)
+	trap 'publish_status false >/dev/null 2>&1 || :; exit 0' TERM INT
+	while :; do
+		if run_once; then _sleep=$(number_or "$(cfg interval)" 300); _backoff=$(number_or "$(cfg backoff_initial)" 30)
+		else _sleep=$_backoff; _backoff=$((_backoff * 2)); [ "$_backoff" -le "$_max" ] || _backoff=$_max; fi
+		[ "$_sleep" -ge 30 ] || _sleep=30; _jitter=$(( $(now) % 11 )); sleep $((_sleep + _jitter))
+	done
 }
 
 case "$1" in
-	once) run_once;;
+	once) run_once;; daemon) daemon;;
 	status) [ -r "$STATE" ] && cat "$STATE" || printf '{"ok":false,"error":"No location collected yet"}\n';;
-	daemon) while :; do run_once; _i=$(cfg interval); is_uint "$_i" || _i=300; [ "$_i" -ge 30 ] || _i=30; sleep "$_i"; done;;
-	*) echo "Usage: $0 {once|daemon|status}" >&2; exit 2;;
+	diagnose) /usr/sbin/opencellid-diagnose;;
+	test-mqtt) SOURCE='test'; publish_status true;;
+	*) echo "Usage: $0 {once|daemon|status|diagnose|test-mqtt}" >&2; exit 2;;
 esac
-

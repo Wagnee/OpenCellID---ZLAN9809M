@@ -1,0 +1,14 @@
+#!/bin/sh
+
+esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/ /g'; }
+exists() { command -v "$1" >/dev/null 2>&1 && printf true || printf false; }
+devices() {
+	for p in /dev/cdc-wdm* /dev/ttyUSB* /dev/ttyACM*; do [ -e "$p" ] && printf '%s ' "$p"; done
+}
+interfaces=$(ubus list 'network.interface.*' 2>/dev/null | tr '\n' ' ')
+wwan=$(ubus call network.interface.wwan status 2>/dev/null)
+model=$(cat /tmp/sysinfo/model 2>/dev/null)
+printf '{"router_model":"%s","commands":{"ubus":%s,"uqmi":%s,"umbim":%s,"mmcli":%s,"gcom":%s,"microcom":%s},"devices":"%s","interfaces":"%s","wwan":%s}\n' \
+	"$(esc "$model")" "$(exists ubus)" "$(exists uqmi)" "$(exists umbim)" "$(exists mmcli)" "$(exists gcom)" "$(exists microcom)" \
+	"$(esc "$(devices)")" "$(esc "$interfaces")" "${wwan:-null}"
+
