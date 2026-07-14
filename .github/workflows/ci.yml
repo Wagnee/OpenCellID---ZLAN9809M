@@ -11,7 +11,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install checks
         run: sudo apt-get update && sudo apt-get install -y shellcheck lua5.1
       - name: Shell syntax and integration
@@ -32,7 +32,7 @@ jobs:
           scripts/build-ipk.sh
           test "$(stat -c %s bin/*.ipk)" -le 1048576
           ar t bin/*.ipk | grep -qx data.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: luci-app-opencellid-mqtt
           path: bin/*.ipk
