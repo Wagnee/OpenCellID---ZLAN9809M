@@ -1,0 +1,6 @@
+*.ipk
+*.apk
+bin/
+.pytest_cache/
+__pycache__/
+
