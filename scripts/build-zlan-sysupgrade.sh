@@ -20,10 +20,10 @@ WORK=$(mktemp -d "$OUTPUT_DIR/.zlan-firmware.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 [ -f "$KERNEL" ] || { echo "Kernel image not found: $KERNEL" >&2; exit 1; }
-[ -d "$ROOTFS/etc" ] && [ -d "$ROOTFS/usr" ] || {
+if [ ! -d "$ROOTFS/etc" ] || [ ! -d "$ROOTFS/usr" ]; then
 	echo "Rootfs directory is invalid: $ROOTFS" >&2
 	exit 1
-}
+fi
 [ -x "$FWTOOL" ] || { echo "fwtool is not executable: $FWTOOL" >&2; exit 1; }
 command -v mksquashfs >/dev/null || { echo "mksquashfs is required" >&2; exit 1; }
 
