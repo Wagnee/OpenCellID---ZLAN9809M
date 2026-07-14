@@ -1,5 +1,12 @@
 # Changelog
 
+## Não lançado
+
+- Adicionado construtor reproduzível de firmware sysupgrade para o ZLAN9809M, com SquashFS XZ, metadata `fwtool` e limite da partição verificado.
+- O instalador de rootfs agora registra o aplicativo e as dependências injetadas no banco de status do `opkg`.
+- Imagem de validação gerada em 2026-07-14 com 10.361.446 bytes e SHA-256 `d2d932ae850860dbd5aa3796cf1ca1521a789957a2ec446876dcda8a1e78b816`.
+- Kernel original preservado byte a byte; metadata e compatibilidade aceitas por `sysupgrade -T` no equipamento `ZLAN,zlan-cat1`. Nenhum flash foi realizado durante a validação.
+
 ## 1.1.4 — 2026-07-14
 
 - normaliza proprietários e permissões dos arquivos no `.ipk` para `root:root`;

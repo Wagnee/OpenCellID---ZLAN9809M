@@ -41,7 +41,17 @@ scripts/install-into-rootfs.sh work/rootfs \
 
 O instalador aceita dependências adicionais `.ipk`, copia o payload, corrige permissões e falha se `uci`, `jsonfilter`, `uclient-fetch` ou `mosquitto_pub` não estiverem presentes. Para o ZLAN auditado, os pacotes devem ser compatíveis com OpenWrt 21.02.0 e `mipsel_24kc`.
 
-O script recusa explicitamente `/`, `/rom` e `/overlay`; ele não grava flash nem cria uma imagem final. A remontagem do SquashFS, composição do firmware, metadata `fwtool`, validação `sysupgrade -T` e recuperação por UART são etapas separadas que precisam ser concluídas antes de qualquer flash.
+O script recusa explicitamente `/`, `/rom` e `/overlay`; ele não grava flash. Depois da injeção, a imagem final do ZLAN9809M auditado pode ser criada em Linux com:
+
+```sh
+scripts/build-zlan-sysupgrade.sh \
+  zlan-kernel.uimage work/rootfs /path/to/fwtool \
+  zlan-opencellid-sysupgrade.bin
+```
+
+O construtor preserva o kernel fornecido, recria o SquashFS em XZ com blocos de 256 KiB, adiciona metadata `fwtool` para `ZLAN,zlan-cat1` e recusa imagens maiores que a partição de firmware de `0x00fb0000` bytes. Os binários extraídos e gerados não devem ser versionados.
+
+Antes de qualquer gravação, copie a imagem para `/tmp` e execute apenas `sysupgrade -T arquivo.bin`. Esse teste não grava a flash. Tenha uma cópia do firmware original e recuperação por UART disponíveis para a etapa posterior de flash.
 
 Os padrões deixam o serviço desativado até que broker e chave OpenCellID sejam provisionados. Nenhuma credencial é embutida na imagem. Para uma configuração de fábrica diferente, edite `files/etc/uci-defaults/99-opencellid` antes da construção, mantendo segredos fora do firmware.
 

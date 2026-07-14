@@ -21,13 +21,15 @@ jobs:
           sh -n files/etc/init.d/opencellid
           sh -n files/etc/uci-defaults/99-opencellid
           sh -n scripts/build-ipk.sh
+          sh -n scripts/build-zlan-sysupgrade.sh
           sh -n scripts/install-into-rootfs.sh
           sh tests/test-agent.sh
+          sh tests/test-firmware-build.sh
           sh tests/test-rootfs-install.sh
           luac5.1 -p files/usr/lib/lua/luci/controller/opencellid.lua
           luac5.1 -p files/usr/lib/lua/luci/model/cbi/opencellid.lua
           test "$(sed -n 's/^PKG_VERSION:=//p' Makefile)" = "$(sed -n 's/^VERSION=//p' files/usr/sbin/opencellid-agent)"
-          shellcheck -x -e SC3043 files/usr/sbin/opencellid-agent files/usr/sbin/opencellid-diagnose files/etc/init.d/opencellid files/etc/uci-defaults/99-opencellid scripts/build-ipk.sh scripts/install-into-rootfs.sh tests/test-agent.sh tests/test-rootfs-install.sh
+          shellcheck -x -e SC3043 files/usr/sbin/opencellid-agent files/usr/sbin/opencellid-diagnose files/etc/init.d/opencellid files/etc/uci-defaults/99-opencellid scripts/build-ipk.sh scripts/build-zlan-sysupgrade.sh scripts/install-into-rootfs.sh tests/test-agent.sh tests/test-firmware-build.sh tests/test-rootfs-install.sh
       - name: Build IPK
         run: scripts/build-ipk.sh
       - name: Verify tag matches package
