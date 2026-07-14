@@ -1,6 +1,6 @@
 #!/bin/sh
 
-VERSION=1.1.0
+VERSION=1.1.4
 CONFIG=opencellid
 RUNTIME=/tmp/opencellid
 STATE=$RUNTIME/state.json
@@ -39,6 +39,23 @@ http_get() {
 read_manual() {
 	MCC=$(cfg manual_mcc); MNC=$(cfg manual_mnc); LAC=$(cfg manual_lac)
 	CID=$(cfg manual_cid); RADIO=$(cfg manual_radio); SIGNAL=; SOURCE=manual
+}
+
+read_zlan() {
+	_imsi=$(uci -q get zlan_config.4G_INFO.imsi | tr -cd '0-9')
+	_len=$(number_or "$(cfg zlan_mnc_length)" 2)
+	[ "${#_imsi}" -ge $((3 + _len)) ] || return 1
+	MCC=$(printf '%s' "$_imsi" | cut -c1-3); MNC=$(printf '%s' "$_imsi" | cut -c4-$((3 + _len)))
+	LAC=$(uci -q get zlan_config.4G_INFO.bs_lac | tr -d '[:space:]')
+	CID=$(uci -q get zlan_config.4G_INFO.bs_cellid | tr -d '[:space:]')
+	[ -n "$LAC" ] && [ -n "$CID" ] || return 1
+	if [ "$(cfg zlan_values_hex)" = 1 ]; then
+		case "$LAC" in 0x*) LAC=$((LAC));; *) LAC=$((0x$LAC));; esac
+		case "$CID" in 0x*) CID=$((CID));; *) CID=$((0x$CID));; esac
+	fi
+	_standard=$(uci -q get zlan_config.4G_INFO.net_standard | tr '[:lower:]' '[:upper:]')
+	case "$_standard" in *NR*|*5G*) RADIO=NR;; *LTE*) RADIO=LTE;; *WCDMA*|*UMTS*|*HSPA*) RADIO=UMTS;; *GSM*|*GPRS*|*EDGE*) RADIO=GSM;; *) RADIO=LTE;; esac
+	SIGNAL=$(uci -q get zlan_config.4G_INFO.csq | tr -d '[:space:]'); SOURCE=zlan
 }
 
 read_ubus() {
@@ -112,8 +129,8 @@ read_at() {
 valid_cell() { is_uint "$MCC" && is_uint "$MNC" && is_uint "$LAC" && is_uint "$CID"; }
 get_cell() {
 	_source=$(cfg cell_source); [ -n "$_source" ] || _source=auto
-	case "$_source" in manual) read_manual;; ubus) read_ubus;; uqmi) read_uqmi;; at) read_at;;
-		auto) read_ubus; valid_cell || read_uqmi; valid_cell || read_at; valid_cell || read_manual;; *) return 1;; esac
+	case "$_source" in manual) read_manual;; zlan) read_zlan;; ubus) read_ubus;; uqmi) read_uqmi;; at) read_at;;
+		auto) read_zlan; valid_cell || read_ubus; valid_cell || read_uqmi; valid_cell || read_at; valid_cell || read_manual;; *) return 1;; esac
 	valid_cell
 }
 

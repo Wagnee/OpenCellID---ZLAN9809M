@@ -11,6 +11,8 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 mkdir -p "$WORK/control" "$WORK/data" "$OUT"
 cp -a "$ROOT/files/." "$WORK/data/"
 chmod 755 "$WORK/data/etc/init.d/opencellid" "$WORK/data/usr/sbin/opencellid-agent" "$WORK/data/usr/sbin/opencellid-diagnose"
+chmod 600 "$WORK/data/etc/config/opencellid"
+chmod 644 "$WORK/data/etc/uci-defaults/99-opencellid" "$WORK/data/usr/lib/lua/luci/controller/opencellid.lua" "$WORK/data/usr/lib/lua/luci/model/cbi/opencellid.lua"
 size=$(du -sk "$WORK/data" | awk '{print $1}')
 cat > "$WORK/control/control" <<EOF
 Package: $NAME
@@ -33,7 +35,7 @@ exit 0
 EOF
 chmod 755 "$WORK/control/postinst"
 printf '2.0\n' > "$WORK/debian-binary"
-(cd "$WORK/control" && tar --format=gnu -czf "$WORK/control.tar.gz" .)
-(cd "$WORK/data" && tar --format=gnu -czf "$WORK/data.tar.gz" .)
-(cd "$WORK" && "${AR:-ar}" r "$OUT/${NAME}_${VERSION}-${RELEASE}_all.ipk" debian-binary control.tar.gz data.tar.gz >/dev/null)
+(cd "$WORK/control" && tar --format=gnu --owner=0 --group=0 --numeric-owner -czf "$WORK/control.tar.gz" .)
+(cd "$WORK/data" && tar --format=gnu --owner=0 --group=0 --numeric-owner -czf "$WORK/data.tar.gz" .)
+(cd "$WORK" && tar --format=gnu --owner=0 --group=0 --numeric-owner -czf "$OUT/${NAME}_${VERSION}-${RELEASE}_all.ipk" ./debian-binary ./control.tar.gz ./data.tar.gz)
 echo "$OUT/${NAME}_${VERSION}-${RELEASE}_all.ipk"

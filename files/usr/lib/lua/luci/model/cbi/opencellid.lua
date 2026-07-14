@@ -55,11 +55,14 @@ local key = s:option(Value, "mqtt_key_file", translate("Chave privada mTLS")); k
 
 local cs = s:option(ListValue, "cell_source", translate("Fonte dos dados da célula"))
 cs:value("auto", translate("Automática")); cs:value("ubus", "ubus/wwan"); cs:value("uqmi", "QMI/uqmi"); cs:value("at", translate("Comandos AT")); cs:value("manual", translate("Manual (diagnóstico)")); cs.default = "auto"
+cs:value("zlan", translate("Firmware ZLAN (zlan_config)"))
 local qd = s:option(Value, "qmi_device", translate("Dispositivo QMI")); qd:depends("cell_source", "uqmi"); qd.default = "/dev/cdc-wdm0"
 local md = s:option(Value, "modem_device", translate("Porta AT")); md:depends("cell_source", "at"); md.default = "/dev/ttyUSB2"
 local aa = s:option(ListValue, "at_adapter", translate("Adaptador AT")); aa:depends("cell_source", "at")
 aa:value("auto", translate("Detectar automaticamente")); aa:value("quectel", "Quectel QENG"); aa:value("simcom", "SIMCom CPSI"); aa:value("generic", "3GPP CEREG"); aa.default = "auto"
 local wi = s:option(Value, "wwan_interface", translate("Interface móvel OpenWrt")); wi.default = "wwan"
+local ml = s:option(ListValue, "zlan_mnc_length", translate("Dígitos do MNC no IMSI ZLAN")); ml:value("2", "2"); ml:value("3", "3"); ml.default = "2"
+local zh = s:option(Flag, "zlan_values_hex", translate("LAC/Cell ID ZLAN estão em hexadecimal")); zh.default = 0
 for _, v in ipairs({{"manual_mcc","MCC"},{"manual_mnc","MNC"},{"manual_lac","LAC/TAC"},{"manual_cid","Cell ID"}}) do
 	local o = s:option(Value, v[1], v[2]); o:depends("cell_source", "manual"); o.datatype = "uinteger"
 end

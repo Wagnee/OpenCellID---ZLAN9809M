@@ -25,6 +25,7 @@ jobs:
           sh tests/test-rootfs-install.sh
           luac5.1 -p files/usr/lib/lua/luci/controller/opencellid.lua
           luac5.1 -p files/usr/lib/lua/luci/model/cbi/opencellid.lua
+          test "$(sed -n 's/^PKG_VERSION:=//p' Makefile)" = "$(sed -n 's/^VERSION=//p' files/usr/sbin/opencellid-agent)"
       - name: ShellCheck
         run: shellcheck -x -e SC3043 files/usr/sbin/opencellid-agent files/usr/sbin/opencellid-diagnose files/etc/init.d/opencellid files/etc/uci-defaults/99-opencellid scripts/build-ipk.sh scripts/install-into-rootfs.sh tests/test-agent.sh tests/test-rootfs-install.sh
       - name: Enforce 1 MB project limit
@@ -33,7 +34,7 @@ jobs:
         run: |
           scripts/build-ipk.sh
           test "$(stat -c %s bin/*.ipk)" -le 1048576
-          ar t bin/*.ipk | grep -qx data.tar.gz
+          tar -tzf bin/*.ipk | grep -qx './data.tar.gz'
       - uses: actions/upload-artifact@v7
         with:
           name: luci-app-opencellid-mqtt

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.4 — 2026-07-14
+
+- normaliza proprietários e permissões dos arquivos no `.ipk` para `root:root`;
+- adiciona fonte celular nativa `zlan_config`, reutilizando os dados publicados pelo processo `zl_usb_serial` sem concorrer pela porta AT;
+- adiciona configuração para MNC de dois/três dígitos e valores LAC/Cell ID hexadecimais.
+
+## 1.1.3 — 2026-07-14
+
+- gera `.ipk` no formato `tar.gz` esperado pelo `opkg` do OpenWrt 21.02;
+- mantém o instalador offline compatível tanto com IPKs OpenWrt em `tar.gz` quanto com pacotes no formato `ar` mais recente.
+
 ## 1.1.2 — 2026-07-14
 
 - corrige a validação POSIX/ShellCheck do instalador offline;

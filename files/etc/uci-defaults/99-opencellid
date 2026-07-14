@@ -34,8 +34,9 @@ set_default modem_device /dev/ttyUSB2
 set_default qmi_device /dev/cdc-wdm0
 set_default at_adapter auto
 set_default wwan_interface wwan
+set_default zlan_mnc_length 2
+set_default zlan_values_hex 0
 
 uci commit opencellid
 /etc/init.d/opencellid enable
 exit 0
-

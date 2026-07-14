@@ -21,11 +21,17 @@ case "$ROOTFS" in /|/rom|/overlay) echo "Refusing to modify a live root filesyst
 extract_ipk() {
 	_ipk=$1
 	[ -f "$_ipk" ] || { echo "Dependency package not found: $_ipk" >&2; exit 1; }
-	_member=$(ar t "$_ipk" | sed -n '/^data\.tar\./{p;q;}')
+	if tar -tzf "$_ipk" >/dev/null 2>&1; then
+		_member=$(tar -tzf "$_ipk" | sed -n '\|data\.tar\.|{p;q;}')
+		_ipk_data() { tar -xOzf "$_ipk" "$_member"; }
+	else
+		_member=$(ar t "$_ipk" | sed -n '/^data\.tar\./{p;q;}')
+		_ipk_data() { ar p "$_ipk" "$_member"; }
+	fi
 	case "$_member" in
-		data.tar.gz) ar p "$_ipk" "$_member" | tar -xzf - -C "$ROOTFS";;
-		data.tar.xz) ar p "$_ipk" "$_member" | tar -xJf - -C "$ROOTFS";;
-		data.tar.zst) ar p "$_ipk" "$_member" | tar --zstd -xf - -C "$ROOTFS";;
+		*data.tar.gz) _ipk_data | tar -xzf - -C "$ROOTFS";;
+		*data.tar.xz) _ipk_data | tar -xJf - -C "$ROOTFS";;
+		*data.tar.zst) _ipk_data | tar --zstd -xf - -C "$ROOTFS";;
 		*) echo "Unsupported or invalid IPK: $_ipk" >&2; exit 1;;
 	esac
 }

@@ -150,6 +150,8 @@ O diagnóstico completo está disponível por SSH:
 
 Em portas AT, `auto` tenta Quectel `AT+QENG="servingcell"`, SIMCom `AT+CPSI?` e então o padrão `AT+CEREG?`. A disposição exata dos campos pode variar por firmware do modem; confirme MCC, MNC, TAC e Cell ID no diagnóstico antes de operar em produção.
 
+No firmware ZLAN auditado, o modo automático consulta primeiro `zlan_config.4G_INFO`, preenchido pelo daemon proprietário `zl_usb_serial`. Isso evita abrir a porta AT enquanto o serviço do fabricante a utiliza. O MCC/MNC é derivado do IMSI; selecione MNC de dois ou três dígitos conforme a operadora e marque a opção hexadecimal somente se a tela 4G da ZLAN apresentar LAC/Cell ID nesse formato.
+
 ## Cache, fila e política de publicação
 
 Todos os dados transitórios ficam em `/tmp/opencellid`:
