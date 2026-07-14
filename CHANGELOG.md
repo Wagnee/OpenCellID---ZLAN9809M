@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2 — 2026-07-14
+
+- corrige a validação POSIX/ShellCheck do instalador offline;
+- faz o workflow de release executar testes e ShellCheck antes de publicar o `.ipk`.
+
 ## 1.1.1 — 2026-07-14
 
 ### Adicionado

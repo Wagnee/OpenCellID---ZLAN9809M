@@ -11,10 +11,10 @@ ROOTFS=$1
 shift
 PROJECT=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 
-[ -d "$ROOTFS/etc" ] && [ -d "$ROOTFS/usr" ] || {
+if [ ! -d "$ROOTFS/etc" ] || [ ! -d "$ROOTFS/usr" ]; then
 	echo "Refusing: target does not look like an extracted OpenWrt rootfs: $ROOTFS" >&2
 	exit 1
-}
+fi
 ROOTFS=$(CDPATH='' cd -- "$ROOTFS" && pwd)
 case "$ROOTFS" in /|/rom|/overlay) echo "Refusing to modify a live root filesystem: $ROOTFS" >&2; exit 1;; esac
 
@@ -47,4 +47,3 @@ done
 
 echo "OpenCellID factory payload installed into: $ROOTFS"
 echo "Defaults will be recreated after every jffs2 factory reset. Secrets were not embedded."
-
