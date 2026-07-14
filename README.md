@@ -1,2 +1,3 @@
-# OpenCellID---ZLAN9809M
-OpenCellID project to use in ZLAN9809M
+A ideia desse projeto é relativamente simples, quero usar o OpenCellID em um roteador ZLAN9809M. 
+A ideia principal é conseguir localizar a posição do dispositivo, não preciso de nada muito preciso ou exato, quero saber em qual bairro o dispositivo esta atualmente. 
+Esse projeto não pode ocupar muito espaço do roteador porque ele não tem mais espaço sobrando (todo o projeto deve ocupar no maximo 1MB e pode ter dependencias com esse repositório como por exemplo baixar os arquivos no momento que detectar internet e guardar apenas as configurações e o básico para iniciar no dispositivo). O ideal é que o envio dos dados seja feito usando mqtt e que seja criado um serviço dentro do menu do dispositivo para ver os dados de localização e configurar o broker mqtt no qual ele vai se conectar. Esse menu tambem deve ter a opção de configuração da frequencia do envio desses dados para o broker mqtt.
